@@ -1,0 +1,211 @@
+package br.com.aaf.processo
+
+import br.com.aaf.geral.*
+import grails.converters.JSON
+import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.http.HttpStatus
+
+class TestAPIController extends DefaultController {
+
+    static allowedMethods = [delete: 'POST', save: 'POST', update: 'POST']
+
+    //first API to check if room is available to book
+    //i used DB classes i already had just so i would have to create new ones so the DBs will be in portuguese but they will make sense
+    //also im using groovy language because is really close from JAVA and kotlin only for because it is not determined which lenguage to use
+    def checkRoomAvailable = {
+        def res = [:]
+        try {
+            def room = Room.executeQuery("select a from Room r where r.available = 0")
+
+            if (room) {
+                response.status = HttpStatus.ACCEPTED.value()
+                res.success = true
+                res.isAvailable = true
+            } else {
+                response.status = HttpStatus.ACCEPTED.value()
+                res.success = true
+                res.isAvailable = false
+            }
+
+            render res as JSON
+        } catch (e) {
+            response.status = HttpStatus.BAD_REQUEST.value()
+            res = [contentType: 'application/json', encoding: 'UTF-8', mensagem: e.getMessage()]
+            render res as JSON
+            return false
+        }
+
+    }
+
+    def cancelRoomReservation = {
+        try {
+            def res = [:]
+            try {
+
+                def jsonParams = request.JSON
+
+                def myUserNumber = jsonParams.userId
+                def myReservationNumber = jsonParams.userId
+
+                def reservation = Reservation.executeQuery("select a from Reservation r where r.userid=:user and r.reservationNumber=:reservNumber", [user: myUserNumber, reservNumber: myReservationNumber])
+
+                if (reservation) {
+                    //check if the reservation can be cancel because off the date
+
+                    Date todaysDate = new Date()
+                    if (reservation.dateToentry < todaysDate) {
+                        res.success = false
+                        res.message = "The reservation cannot be canceled, because it's less than 24h notice."
+                    } else {
+
+                        //set room as available
+                        reservation?.room.available = 1
+                        reservation.save(flush: true)
+
+                        if (reservation.errors.getAllErros.size() == 0) {
+                            res.success = true
+                            res.message = "Reservation cancelled."
+                        } else {
+                            res.success = false
+                            res.message = "An error ocurred saving!"
+                        }
+                    }
+                } else {
+                    response.status = HttpStatus.ACCEPTED.value()
+                    res.success = true
+                    res.isAvailable = false
+                }
+
+                render res as JSON
+            } catch (e) {
+                response.status = HttpStatus.BAD_REQUEST.value()
+                res = [contentType: 'application/json', encoding: 'UTF-8', mensagem: e.getMessage()]
+                render res as JSON
+                return false
+            }
+        } catch (e) {
+            response.status = HttpStatus.BAD_REQUEST.value()
+            res = [contentType: 'application/json', encoding: 'UTF-8', mensagem: e.getMessage()]
+            render res as JSON
+            return false
+        }
+    }
+
+    def modifyReservation = {
+        try {
+            def res = [:]
+            def jsonParams = request.JSON
+
+            def dateFormat = SimpleDateFormat("yyy-MM-dd")
+            def newDateOfEntry = dateFormat.parse(jsonParams.newDateToReserve)
+
+            if (isOlderThan(3, newDateOfEntry.time, System.currentTimeMillis())) {
+                //check if the room is available on the date the customer wants
+
+                def reservation = Resevation.executeQuery("select r from Reservation r where r.dateToentry =:dateofEntry", [dateofEntry: newDateOfEntry])
+                if (reservation?.room.available == 0) {
+                    res.success = false
+                    res.message = "Room is not available for the date of entry"
+                    render res as JSON
+                    return
+                } else {
+                    //the room is available lets create a new reservation for thar day
+
+                    Reservation reserve = new Reservation()
+                    reserve.id = UUID.randomUUID().toString()
+                    reserve.dateToEntry = newDateOfEntry
+                    reserve.reservationNumber = UUID.randomUUID().toString()
+                    reserve.save(flush: true)
+
+                    if (reserve.errors.getAllErrors.size() == 0) {
+                        res.success = true
+                        res.message = "Your new reservation was successufuly made."
+                        render res as JSON
+                        return
+                    }
+                }
+            } else {
+                res.success = false
+                res.message = "The date you chose is bigger than 3 days"
+                render res as JSON
+                return
+            }
+
+        } catch (e) {
+            response.status = HttpStatus.BAD_REQUEST.value()
+            res = [contentType: 'application/json', encoding: 'UTF-8', mensagem: e.getMessage()]
+            render res as JSON
+            return false
+        }
+    }
+
+    def createNewReservation = {
+        try {
+
+
+            def res = [:]
+
+            def jsonParams = request.JSON
+
+            def dateOfReservation = jsonParams.dateOfReservation
+
+            //fisrt lets check if the date is bigger than 30 days than we will test for lass than one day
+
+            if (isOlderThan(30, newDateOfEntry.time, System.currentTimeMillis())) {
+                res.success = false
+                res.message = "Date unavailable, date bigger than 30 days prior"
+                render res as JSON
+                return
+            }
+
+            if (isOlderThan(1, newDateOfEntry.time, System.currentTimeMillis())) {
+                res.success = false
+                res.message = "Date unavailable, date less than 1 day"
+                render res as JSON
+                return
+            }
+
+            def reservation = Resevation.executeQuery("select r from Reservation r where r.dateToentry =:dateofEntry", [dateofEntry: dateOfReservation])
+
+            if (reservation) {
+                res.success = false
+                res.message = "Date unavailable, there is already a reservation for this day"
+                render res as JSON
+                return
+            } else {
+                //create new reservation and making room unavailable
+
+                Reservation reserve = new Reservation()
+                reserve.id = UUID.randomUUID().toString()
+                reserve.dateToEntry = newDateOfEntry
+                reserve.reservationNumber = UUID.randomUUID().toString()
+                reserve.room.available = 0
+                reserve.save(flush: true)
+
+                res.success = true
+                res.message = "Your new reservation was successufuly made."
+                render res as JSON
+                return
+            }
+
+        } catch (e) {
+            response.status = HttpStatus.BAD_REQUEST.value()
+            res = [contentType: 'application/json', encoding: 'UTF-8', mensagem: e.getMessage()]
+            render res as JSON
+            return false
+        }
+    }
+
+
+    def isOlderThan(def interval, def previousTime, def currentTime) {
+        def currentDate = Date(currentTime)
+        def previousDate = Date(previousTime)
+
+        def diffCalculate = abs(currentDate.time - previousDate.time)
+        def diffDays = diffCalculate / (24 * 60 * 60 * 1000)
+
+        return diffDays > interval
+    }
+
+}
+
